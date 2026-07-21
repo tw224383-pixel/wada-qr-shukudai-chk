@@ -140,14 +140,14 @@ const DashboardView = {
           </div>
           
           <!-- 右側: 名簿一覧と未提出リスト -->
-          <div class="w-full md:w-2/3 flex flex-col gap-4 h-[calc(100vh-140px)] md:h-[calc(100vh-100px)]">
+          <div class="w-full md:w-2/3 flex flex-col gap-4 h-[60vh] md:h-[calc(100vh-100px)] min-h-[500px]">
             
             <!-- 表コンテナ -->
             <div class="bg-white rounded-lg shadow-sm overflow-hidden flex flex-col flex-1 border border-gray-100">
                 <div class="p-2 md:p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0 flex-wrap gap-2">
                   <h2 class="font-bold text-gray-800 flex items-center gap-2 text-sm"><i data-lucide="table" class="w-4 h-4"></i>提出一覧</h2>
                   <div class="flex items-center gap-2">
-                    <button id="dash-lock-btn" onclick="window.dashToggleLock()" class="text-[10px] bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded hidden md:flex items-center gap-1 font-bold transition-colors border border-red-200">
+                    <button id="dash-lock-btn" onclick="window.dashToggleLock()" class="text-[10px] bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors border border-red-200 shadow-sm">
                       <i data-lucide="lock" class="w-3 h-3" id="dash-lock-icon"></i> <span id="dash-lock-text">編集ロック中</span>
                     </button>
                     
@@ -491,11 +491,11 @@ const DashboardView = {
 
     if (window.isStatusEditUnlocked) {
       btnText.textContent = '編集中 (解除済)';
-      btn.className = 'text-[10px] bg-green-100 text-green-700 hover:bg-green-200 px-2 py-1 rounded hidden md:flex items-center gap-1 font-bold transition-colors border border-green-200';
+      btn.className = 'text-[10px] bg-green-100 text-green-700 hover:bg-green-200 px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors border border-green-200 shadow-sm';
       btnIcon.setAttribute('data-lucide', 'unlock');
     } else {
       btnText.textContent = '編集ロック中';
-      btn.className = 'text-[10px] bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded hidden md:flex items-center gap-1 font-bold transition-colors border border-red-200';
+      btn.className = 'text-[10px] bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors border border-red-200 shadow-sm';
       btnIcon.setAttribute('data-lucide', 'lock');
     }
     lucide.createIcons({ root: btn });
