@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>和田小宿題チェッカー</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#0ea5e9', // sky-500
+            secondary: '#10b981', // emerald-500
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Libraries -->
+  <!-- PapaParse for CSV -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- QRCode.js for generating QR -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Html5-Qrcode for scanning -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <!-- Firebase Firestore -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans h-screen flex flex-col overflow-hidden">
+  
+  <!-- Header -->
+  <header class="bg-white shadow-sm z-10 flex-shrink-0">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i data-lucide="book-check" class="w-6 h-6 text-primary"></i>
+        <h1 class="text-xl font-bold text-gray-900">和田小宿題チェッカー</h1>
+      </div>
+      <nav class="hidden md:flex gap-4" id="main-nav">
+        <!-- Nav buttons injected by JS -->
+      </nav>
+      <!-- Mobile menu button -->
+      <button class="md:hidden p-2 text-gray-600" id="mobile-menu-btn">
+        <i data-lucide="menu" class="w-6 h-6"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Mobile Nav -->
+  <div id="mobile-nav" class="hidden md:hidden bg-white border-b border-gray-200">
+    <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3 flex flex-col" id="mobile-nav-container">
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-auto bg-gray-50 p-4 relative" id="app-content">
+    <!-- Views injected here -->
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-gray-200 flex-shrink-0">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center text-xs text-gray-500">
+      <div>作成者: 黒田先生</div>
+      <div class="text-red-400">異動後の保守点検は対応できません</div>
+    </div>
+  </footer>
+
+  <!-- Print Area (Hidden in normal view) -->
+  <div id="print-area" class="hidden"></div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-16 left-1/2 transform -translate-x-1/2 flex flex-col gap-2 z-50 pointer-events-none"></div>
+
+  <!-- App Scripts -->
+  <script src="firebase-sync.js"></script>
+  <script src="store.js"></script>
+  <script src="components.js"></script>
+  <script src="views/dashboard.js"></script>
+  <script src="views/master.js"></script>
+  <script src="views/printer.js"></script>
+  <script src="views/history.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

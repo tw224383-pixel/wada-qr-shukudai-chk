@@ -1,0 +1,62 @@
+/* 印刷用スタイル */
+@media print {
+  body > *:not(#print-area) {
+    display: none !important;
+  }
+  #print-area {
+    display: block !important;
+  }
+  @page {
+    margin: 0;
+  }
+  .print-page {
+    padding: 10mm;
+    page-break-after: always;
+  }
+}
+
+/* スキャナのオーバーレイ等 */
+#qr-reader {
+  width: 100%;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+#qr-reader__scan_region {
+  background: white;
+}
+
+#qr-reader__dashboard {
+  padding: 10px;
+  background: white;
+}
+
+/* トーストのアニメーション */
+.toast-enter {
+  animation: slide-up 0.3s ease-out forwards;
+}
+
+.toast-exit {
+  animation: fade-out 0.3s ease-out forwards;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
