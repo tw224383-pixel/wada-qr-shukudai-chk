@@ -177,7 +177,7 @@ const PrinterView = {
       height: 50,
       colorDark : "#000000",
       colorLight : "#ffffff",
-      correctLevel : QRCode.CorrectLevel.M
+      correctLevel : QRCode.CorrectLevel.L // ドットを粗くして認識速度を極限まで上げる
     });
 
     return sticker;

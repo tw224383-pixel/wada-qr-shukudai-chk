@@ -361,6 +361,16 @@ const DashboardView = {
       if (!document.getElementById('dash-qr-reader')) return;
       
       const startScanner = () => {
+        const readerElement = document.getElementById('dash-qr-reader');
+        if (!readerElement) return;
+
+        // すでにインスタンスがあればクリア
+        if (dashHtml5QrcodeScanner) {
+          try {
+            dashHtml5QrcodeScanner.clear();
+          } catch(e) {}
+        }
+        
         dashHtml5QrcodeScanner = new Html5Qrcode("dash-qr-reader");
         
         let lastScannedText = "";
@@ -444,40 +454,32 @@ const DashboardView = {
 
         const onScanError = (error) => {};
 
-        dashHtml5QrcodeScanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: {width: 200, height: 200}, aspectRatio: 1.0 },
-          onScanSuccess,
-          onScanError
-        ).catch(err => {
-          console.log("Scanner start failed, retrying with user camera", err);
-          if (dashHtml5QrcodeScanner) {
-             dashHtml5QrcodeScanner.start(
-               { facingMode: "user" },
-               { fps: 10, qrbox: {width: 200, height: 200}, aspectRatio: 1.0 },
-               onScanSuccess,
-               onScanError
-             ).catch(e => console.error("Camera completely failed", e));
-          }
+        // 設定: 0はHtml5QrcodeSupportedFormats.QR_CODEを意味する
+        const scannerConfig = { 
+          fps: 15, 
+          formatsToSupport: [ 0 ]
+        };
+
+        const tryStartCamera = (facingMode, config, fallbackFn) => {
+          dashHtml5QrcodeScanner.start(
+            { facingMode: facingMode },
+            config,
+            onScanSuccess,
+            onScanError
+          ).catch(e => {
+            console.warn(`Camera start failed for ${facingMode}`, e);
+            if (fallbackFn) fallbackFn();
+            else DashboardView.showScanResult("カメラの起動に失敗しました", "error");
+          });
+        };
+
+        // フォールバック戦略: environment -> user -> エラー
+        tryStartCamera("environment", scannerConfig, () => {
+          tryStartCamera("user", scannerConfig, null);
         });
       };
 
-      if (dashHtml5QrcodeScanner) {
-        if (dashHtml5QrcodeScanner.isScanning) {
-          dashHtml5QrcodeScanner.stop().then(() => {
-            dashHtml5QrcodeScanner.clear();
-            startScanner();
-          }).catch(e => {
-            console.error(e);
-            startScanner();
-          });
-        } else {
-          dashHtml5QrcodeScanner.clear();
-          startScanner();
-        }
-      } else {
-        startScanner();
-      }
+      startScanner();
     }, 100);
 
     DashboardView.updateLockUI();

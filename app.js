@@ -19,39 +19,24 @@ class App {
 
     this.initNav();
     
-    // Handle mobile menu toggle
-    document.getElementById('mobile-menu-btn').addEventListener('click', () => {
-      const mobileNav = document.getElementById('mobile-nav');
-      mobileNav.classList.toggle('hidden');
-    });
+    // 以前のハンバーガーメニューイベントは削除されました
   }
 
   initNav() {
     const mainNav = document.getElementById('main-nav');
-    const mobileNavContainer = document.getElementById('mobile-nav-container');
+    if (!mainNav) return;
     
     mainNav.innerHTML = '';
-    mobileNavContainer.innerHTML = '';
 
     Object.keys(routes).forEach(key => {
       const route = routes[key];
       
-      // Desktop nav button
       const btn = document.createElement('button');
-      btn.className = `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${this.currentRoute === key ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`;
-      btn.innerHTML = `<i data-lucide="${route.icon}" class="w-4 h-4"></i>${route.title}`;
+      // モバイルではアイコンが上、文字が下の縦並びに。PCでは横並びに。
+      btn.className = `flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 px-2 md:px-3 py-1.5 md:py-2 rounded-md text-[10px] md:text-sm font-medium transition-colors flex-1 md:flex-none min-w-[4rem] ${this.currentRoute === key ? 'bg-primary text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`;
+      btn.innerHTML = `<i data-lucide="${route.icon}" class="w-4 h-4 md:w-4 md:h-4"></i><span class="whitespace-nowrap">${route.title}</span>`;
       btn.onclick = () => this.navigate(key);
       mainNav.appendChild(btn);
-
-      // Mobile nav button
-      const mobileBtn = document.createElement('button');
-      mobileBtn.className = `flex items-center gap-2 px-3 py-2 rounded-md text-base font-medium w-full text-left transition-colors ${this.currentRoute === key ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`;
-      mobileBtn.innerHTML = `<i data-lucide="${route.icon}" class="w-5 h-5"></i>${route.title}`;
-      mobileBtn.onclick = () => {
-        this.navigate(key);
-        document.getElementById('mobile-nav').classList.add('hidden');
-      };
-      mobileNavContainer.appendChild(mobileBtn);
     });
     
     lucide.createIcons();
