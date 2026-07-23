@@ -378,8 +378,8 @@ const DashboardView = {
 
         const onScanSuccess = (decodedText, decodedResult) => {
           const now = Date.now();
-          if (decodedText === lastScannedText && now - lastScannedTime < 2000) {
-            return;
+          if (decodedText === lastScannedText && now - lastScannedTime < 1500) {
+            return; // 1.5秒以内の同一QRは重複とみなす
           }
           lastScannedText = decodedText;
           lastScannedTime = now;
@@ -454,28 +454,49 @@ const DashboardView = {
 
         const onScanError = (error) => {};
 
-        // 設定: 0はHtml5QrcodeSupportedFormats.QR_CODEを意味する
+        // --- スキャン設定 ---
+        // qrboxを動的計算: カメラ映像エリアの短辺の70%をQR認識枠とする
+        // 枠が小さすぎると認識しにくく、大きすぎると外乱ノイズを拾うため適正値に固定
+        const qrboxSize = Math.min(
+          document.getElementById('dash-qr-reader').clientWidth,
+          document.getElementById('dash-qr-reader').clientHeight || 250
+        );
+        const dynamicQrBox = Math.floor(qrboxSize * 0.75);
+
         const scannerConfig = { 
-          fps: 15, 
-          formatsToSupport: [ 0 ]
+          fps: 25,                    // 1秒25フレームで高頻度解析
+          qrbox: { width: dynamicQrBox, height: dynamicQrBox }, // 動的計算枠
+          formatsToSupport: [ 0 ],    // QRコードのみに絞る（0 = QR_CODE）
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true  // ネイティブAPIを優先使用
+          }
         };
 
-        const tryStartCamera = (facingMode, config, fallbackFn) => {
+        // 高画質カメラを優先。失敗したらフォールバック。
+        const videoConstraintsHD = {
+          facingMode: "environment",
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 }
+        };
+
+        const tryStart = (videoConstraints, config, fallbackFn) => {
           dashHtml5QrcodeScanner.start(
-            { facingMode: facingMode },
+            videoConstraints,
             config,
             onScanSuccess,
             onScanError
           ).catch(e => {
-            console.warn(`Camera start failed for ${facingMode}`, e);
+            console.warn('Camera start failed, trying fallback', e);
             if (fallbackFn) fallbackFn();
             else DashboardView.showScanResult("カメラの起動に失敗しました", "error");
           });
         };
 
-        // フォールバック戦略: environment -> user -> エラー
-        tryStartCamera("environment", scannerConfig, () => {
-          tryStartCamera("user", scannerConfig, null);
+        // 試行順: HD背面 → 標準背面 → 前面
+        tryStart(videoConstraintsHD, scannerConfig, () => {
+          tryStart({ facingMode: "environment" }, scannerConfig, () => {
+            tryStart({ facingMode: "user" }, scannerConfig, null);
+          });
         });
       };
 
