@@ -157,15 +157,18 @@ const PrinterView = {
     sticker.className = 'w-[40mm] h-[25mm] border border-gray-300 p-1 flex items-center bg-white overflow-hidden text-xs shrink-0';
     
     const qrDiv = document.createElement('div');
-    qrDiv.className = 'flex-shrink-0';
+    // シール縦幅(25mm)に対して最大限大きく(21mm)配置。印刷時の余白と高解像度表示を両立
+    qrDiv.className = 'flex-shrink-0 w-[21mm] h-[21mm] bg-white p-0.5 border border-gray-100 rounded-sm flex items-center justify-center [&>img]:w-full [&>img]:h-full [&>canvas]:w-full [&>canvas]:h-full';
     
-    const qrData = JSON.stringify({ s: student.id, a: assignment.id });
+    // データ長を極限まで短縮し、QRのドット数を最小限（Version 2: 25x25等）に抑える
+    const qrData = `${student.id}:${assignment.id}`;
     
     const textDiv = document.createElement('div');
     textDiv.className = 'ml-2 flex flex-col justify-center overflow-hidden w-full';
+    const displayNum = student.number ? `${utils.escapeHTML(student.number)}. ` : '';
     textDiv.innerHTML = `
-      <div class="font-bold truncate text-[10px] leading-tight">${utils.escapeHTML(student.name)}</div>
-      <div class="text-[8px] text-gray-600 truncate mt-1 leading-tight">${utils.escapeHTML(assignment.title)}</div>
+      <div class="font-bold truncate text-[11px] leading-tight text-gray-900">${displayNum}${utils.escapeHTML(student.name)}</div>
+      <div class="text-[9px] text-gray-600 truncate mt-1 leading-tight font-medium">${utils.escapeHTML(assignment.title)}</div>
     `;
 
     sticker.appendChild(qrDiv);
@@ -173,11 +176,11 @@ const PrinterView = {
 
     new QRCode(qrDiv, {
       text: qrData,
-      width: 50,
-      height: 50,
+      width: 256, // 内部解像度を高精細（256px）にして印刷時のぼやけを完全に防止
+      height: 256,
       colorDark : "#000000",
       colorLight : "#ffffff",
-      correctLevel : QRCode.CorrectLevel.L // ドットを粗くして認識速度を極限まで上げる
+      correctLevel : QRCode.CorrectLevel.M // 業界標準のレベルM（15%復元）。ドットが大きく読み取りやすさと復元力の黄金比
     });
 
     return sticker;

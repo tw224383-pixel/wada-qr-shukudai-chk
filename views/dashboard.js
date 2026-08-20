@@ -391,11 +391,37 @@ const DashboardView = {
           const soundIndex = document.getElementById('dash-sound-select')?.value || '1';
           
           try {
-            const qrData = JSON.parse(decodedText);
-            if (!qrData.s || !qrData.a) throw new Error("Invalid Format");
+            let studentId = null;
+            let assignmentId = null;
+
+            const text = (decodedText || '').trim();
+            if (text.startsWith('{')) {
+              // 従来形式 (JSON: {"s":"...","a":"..."})
+              const qrData = JSON.parse(text);
+              studentId = qrData.s;
+              assignmentId = qrData.a;
+            } else if (text.includes(':')) {
+              // 新形式 (コンパクト: studentId:assignmentId または W:studentId:assignmentId)
+              const parts = text.split(':');
+              if (parts.length === 2) {
+                studentId = parts[0];
+                assignmentId = parts[1];
+              } else if (parts.length >= 3) {
+                studentId = parts[1];
+                assignmentId = parts[2];
+              }
+            } else if (text.includes('_')) {
+              const parts = text.split('_');
+              studentId = parts[0];
+              assignmentId = parts[1];
+            }
+
+            if (!studentId || !assignmentId) {
+              throw new Error("Invalid Format");
+            }
             
-            const student = store.data.students.find(s => s.id === qrData.s);
-            const assignment = store.data.assignments.find(a => a.id === qrData.a);
+            const student = store.data.students.find(s => s.id === studentId);
+            const assignment = store.data.assignments.find(a => a.id === assignmentId);
 
             if (!student || !assignment) {
               utils.playBeep('error');
@@ -409,9 +435,9 @@ const DashboardView = {
             if (mode === 'all') {
               const saved = localStorage.getItem('todayAssignments');
               const todayAssings = saved ? JSON.parse(saved) : store.data.assignments.map(a=>a.id);
-              if (todayAssings.includes(qrData.a)) isTarget = true;
+              if (todayAssings.includes(assignmentId)) isTarget = true;
             } else {
-              if (mode === qrData.a) isTarget = true;
+              if (mode === assignmentId) isTarget = true;
             }
 
             if (!isTarget) {
@@ -423,7 +449,7 @@ const DashboardView = {
             }
 
             // 対象なので受理する
-            const success = store.addSubmission(qrData.s, qrData.a, 'submitted');
+            const success = store.addSubmission(studentId, assignmentId, 'submitted');
             
             if (success) {
               utils.playSuccessSound(soundIndex);
@@ -432,8 +458,8 @@ const DashboardView = {
               if (enableAudio) utils.speak(`${student.number}番、提出しました`);
               
               // UI反映
-              DashboardView.updateRowUI(qrData.s, qrData.a, 'submitted');
-              DashboardView.highlightRow(qrData.s);
+              DashboardView.updateRowUI(studentId, assignmentId, 'submitted');
+              DashboardView.highlightRow(studentId);
               DashboardView.updateStatsUI();
               DashboardView.updateUnsubmittedListUI();
 
@@ -443,7 +469,7 @@ const DashboardView = {
               if (enableVibe) utils.vibrate([100, 50, 100]);
               DashboardView.showScanResult(`【重複】 ${utils.escapeHTML(student.name)}さん済`, 'warning');
               if (enableAudio) utils.speak(`提出済みです`);
-              DashboardView.highlightRow(qrData.s);
+              DashboardView.highlightRow(studentId);
             }
 
           } catch(e) {
@@ -455,10 +481,14 @@ const DashboardView = {
         const onScanError = (error) => {};
 
         // --- スキャン設定 ---
-        // qrboxは200x200に固定（過度な計算はカメラ素況の原因になるため固定値が安全）
+        // 画面の85%を広く読み取り対象にする（位置合わせ不要でかざすだけで即認識）
         const scannerConfig = { 
-          fps: 15,
-          qrbox: { width: 200, height: 200 },
+          fps: 20,
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const edge = Math.max(180, Math.floor(minEdge * 0.85));
+            return { width: edge, height: edge };
+          },
           formatsToSupport: [ 0 ],    // QRコードのみ（0 = QR_CODE）
           experimentalFeatures: {
             useBarCodeDetectorIfSupported: true  // 対応端末はネイティブAPIを使用

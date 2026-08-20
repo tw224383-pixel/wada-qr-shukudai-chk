@@ -70,10 +70,15 @@ class Store {
     this.listeners.forEach(l => l(this.data));
   }
 
+  // 短く一意なID生成ヘルパー (例: "m0k2x9a_7b")
+  _generateId() {
+    return Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+  }
+
   // --- Students ---
   getStudents() { return this.data.students; }
   addStudent(student) {
-    this.data.students.push({ id: Date.now().toString(), ...student });
+    this.data.students.push({ id: this._generateId(), ...student });
     this.saveData();
   }
   updateStudent(id, studentData) {
@@ -90,14 +95,14 @@ class Store {
     this.saveData();
   }
   importStudents(students) {
-    this.data.students = students.map(s => ({ id: Date.now().toString() + Math.random(), ...s }));
+    this.data.students = students.map((s, i) => ({ id: `${Date.now().toString(36)}_${i}_${Math.random().toString(36).substring(2, 5)}`, ...s }));
     this.saveData();
   }
 
   // --- Assignments ---
   getAssignments() { return this.data.assignments; }
   addAssignment(assignment) {
-    this.data.assignments.push({ id: Date.now().toString(), ...assignment });
+    this.data.assignments.push({ id: this._generateId(), ...assignment });
     this.saveData();
   }
   updateAssignment(id, assignmentData) {
@@ -114,7 +119,7 @@ class Store {
     this.saveData();
   }
   importAssignments(assignments) {
-    this.data.assignments = assignments.map(a => ({ id: Date.now().toString() + Math.random(), ...a }));
+    this.data.assignments = assignments.map((a, i) => ({ id: `${Date.now().toString(36)}_${i}_${Math.random().toString(36).substring(2, 5)}`, ...a }));
     this.saveData();
   }
 
