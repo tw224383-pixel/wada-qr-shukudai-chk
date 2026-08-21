@@ -1,5 +1,8 @@
 // views/dashboard.js
 let dashHtml5QrcodeScanner = null;
+let dashNativeStream = null;
+let dashNativeAnimId = null;
+let isDashNativeScanning = false;
 
 const DashboardView = {
   render() {
@@ -360,23 +363,17 @@ const DashboardView = {
     setTimeout(() => {
       if (!document.getElementById('dash-qr-reader')) return;
       
-      const startScanner = () => {
+      const startScanner = async () => {
         const readerElement = document.getElementById('dash-qr-reader');
         if (!readerElement) return;
 
-        // すでにインスタンスがあればクリア
-        if (dashHtml5QrcodeScanner) {
-          try {
-            dashHtml5QrcodeScanner.clear();
-          } catch(e) {}
-        }
-        
-        dashHtml5QrcodeScanner = new Html5Qrcode("dash-qr-reader");
-        
+        // すでにインスタンスやストリームがあればクリーンアップ
+        DashboardView.destroy();
+
         let lastScannedText = "";
         let lastScannedTime = 0;
 
-        const onScanSuccess = (decodedText, decodedResult) => {
+        const onScanSuccess = (decodedText) => {
           const now = Date.now();
           if (decodedText === lastScannedText && now - lastScannedTime < 1500) {
             return; // 1.5秒以内の同一QRは重複とみなす
@@ -478,53 +475,109 @@ const DashboardView = {
           }
         };
 
+        // 1. 最速のネイティブ BarcodeDetector（GPU/NPU 60fps）を最優先で試行
+        let nativeSupported = false;
+        if ('BarcodeDetector' in window) {
+          try {
+            const formats = await BarcodeDetector.getSupportedFormats();
+            if (formats.includes('qr_code')) {
+              nativeSupported = true;
+            }
+          } catch(e) {}
+        }
+
+        if (nativeSupported) {
+          try {
+            readerElement.innerHTML = `
+              <video id="dash-native-video" playsinline autoplay muted class="w-full h-full object-cover"></video>
+              <div class="absolute inset-0 pointer-events-none border border-primary/30 m-3 rounded flex items-center justify-center">
+                <div class="w-full h-0.5 bg-primary/70 shadow-[0_0_8px_rgba(14,165,233,0.8)] animate-pulse"></div>
+              </div>
+            `;
+            const video = document.getElementById('dash-native-video');
+            
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+              audio: false
+            });
+            dashNativeStream = stream;
+            video.srcObject = stream;
+            await video.play();
+
+            const detector = new BarcodeDetector({ formats: ['qr_code'] });
+            isDashNativeScanning = true;
+
+            let isProcessing = false;
+            const loop = async () => {
+              if (!isDashNativeScanning) return;
+              if (!isProcessing && video.readyState >= 2) {
+                isProcessing = true;
+                try {
+                  const codes = await detector.detect(video);
+                  if (codes && codes.length > 0 && codes[0].rawValue) {
+                    onScanSuccess(codes[0].rawValue);
+                  }
+                } catch(err) {
+                } finally {
+                  isProcessing = false;
+                }
+              }
+
+              if ('requestVideoFrameCallback' in video) {
+                video.requestVideoFrameCallback(loop);
+              } else {
+                dashNativeAnimId = requestAnimationFrame(loop);
+              }
+            };
+
+            if ('requestVideoFrameCallback' in video) {
+              video.requestVideoFrameCallback(loop);
+            } else {
+              dashNativeAnimId = requestAnimationFrame(loop);
+            }
+
+            console.log('⚡ 最速ハードウェアスキャナー (BarcodeDetector 60fps) 稼働中');
+            return;
+          } catch(err) {
+            console.warn('Native BarcodeDetector start failed, falling back to Html5Qrcode', err);
+            DashboardView.destroy();
+          }
+        }
+
+        // 2. フォールバック: Html5Qrcode（互換スキャナー）
+        readerElement.innerHTML = '';
+        dashHtml5QrcodeScanner = new Html5Qrcode("dash-qr-reader");
+
         const onScanError = (error) => {};
 
-        // --- スキャン設定 ---
-        // 画面の85%を広く読み取り対象にする（位置合わせ不要でかざすだけで即認識）
+        // 画面の85%を広く読み取り対象にする
         const scannerConfig = { 
-          fps: 20,
+          fps: 25,
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
             const edge = Math.max(180, Math.floor(minEdge * 0.85));
             return { width: edge, height: edge };
           },
-          formatsToSupport: [ 0 ],    // QRコードのみ（0 = QR_CODE）
+          formatsToSupport: [ 0 ],
           experimentalFeatures: {
-            useBarCodeDetectorIfSupported: true  // 対応端末はネイティブAPIを使用
+            useBarCodeDetectorIfSupported: true
           }
         };
 
-        // カメラ起動済みのチェック: 発火かどうかを判定
         const tryStart = (videoConstraints, config, fallbackFn) => {
           dashHtml5QrcodeScanner.start(
             videoConstraints,
             config,
             onScanSuccess,
             onScanError
-          ).then(() => {
-            // 起動成功。一定時間待って映像確認
-            setTimeout(() => {
-              const video = document.querySelector('#dash-qr-reader video');
-              if (video && (video.videoWidth === 0 || video.readyState < 2)) {
-                // 映像が出ていない場合は停止してフォールバック
-                console.warn('Camera started but no video, falling back');
-                dashHtml5QrcodeScanner.stop().then(() => {
-                  if (fallbackFn) fallbackFn();
-                  else DashboardView.showScanResult('カメラが映りませんでした', 'error');
-                }).catch(() => {
-                  if (fallbackFn) fallbackFn();
-                });
-              }
-            }, 1500);
-          }).catch(e => {
+          ).catch(e => {
             console.warn('Camera start failed, trying fallback', e);
             if (fallbackFn) fallbackFn();
             else DashboardView.showScanResult("カメラの起動に失敗しました", "error");
           });
         };
 
-        // 試行順: 背面カメラ → 前面カメラ（iPadなどで背面が失敗する場合）
+        // 試行順: 背面カメラ → 前面カメラ
         tryStart({ facingMode: "environment" }, scannerConfig, () => {
           tryStart({ facingMode: "user" }, scannerConfig, null);
         });
@@ -823,16 +876,27 @@ const DashboardView = {
   },
 
   destroy() {
+    isDashNativeScanning = false;
+    if (dashNativeAnimId) {
+      cancelAnimationFrame(dashNativeAnimId);
+      dashNativeAnimId = null;
+    }
+    if (dashNativeStream) {
+      dashNativeStream.getTracks().forEach(t => t.stop());
+      dashNativeStream = null;
+    }
     if (dashHtml5QrcodeScanner) {
-      if (dashHtml5QrcodeScanner.isScanning) {
-        dashHtml5QrcodeScanner.stop().then(() => {
+      try {
+        if (dashHtml5QrcodeScanner.isScanning) {
+          dashHtml5QrcodeScanner.stop().then(() => {
+            dashHtml5QrcodeScanner.clear();
+            dashHtml5QrcodeScanner = null;
+          }).catch(() => {});
+        } else {
           dashHtml5QrcodeScanner.clear();
           dashHtml5QrcodeScanner = null;
-        }).catch(e => console.error("Failed to stop scanner", e));
-      } else {
-        dashHtml5QrcodeScanner.clear();
-        dashHtml5QrcodeScanner = null;
-      }
+        }
+      } catch(e) {}
     }
   }
 };
