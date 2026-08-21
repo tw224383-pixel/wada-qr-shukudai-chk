@@ -53,12 +53,38 @@ const PrinterView = {
           </div>
           
           <div class="flex gap-4 mt-6">
-            <button id="btn-generate-print" class="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded font-medium flex items-center gap-2 transition-colors shadow-sm">
-              <i data-lucide="printer" class="w-5 h-5"></i>
-              印刷プレビューを生成
+            <button id="btn-generate-print" class="bg-primary hover:bg-blue-600 text-white px-5 py-2.5 rounded font-bold flex items-center gap-2 transition-all shadow-sm">
+              <i data-lucide="qr-code" class="w-5 h-5"></i>
+              QRシールを生成・プレビュー表示
             </button>
           </div>
-          <p class="text-xs text-gray-500 mt-2">※ブラウザの印刷ダイアログが起動します。レイアウト設定で「余白なし」等を調整してください。</p>
+        </div>
+
+        <!-- プレビュー表示コンテナ -->
+        <div id="print-preview-container" class="hidden bg-white p-6 rounded-lg shadow-sm border border-blue-200 mb-8 transition-all">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-4 border-b">
+            <div>
+              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <i data-lucide="eye" class="w-5 h-5 text-primary"></i>
+                生成されたQRシール プレビュー
+              </h2>
+              <p class="text-xs text-gray-500 mt-1" id="print-preview-count"></p>
+            </div>
+            <div class="flex gap-3 w-full sm:w-auto">
+              <button id="btn-do-print" class="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded shadow flex items-center justify-center gap-2 text-sm transition-all transform hover:scale-105">
+                <i data-lucide="printer" class="w-4 h-4"></i>
+                この内容で印刷する
+              </button>
+            </div>
+          </div>
+          
+          <div class="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded mb-4">
+            💡 <strong>印刷時のヒント:</strong> 「この内容で印刷する」を押すと印刷ダイアログが開きます。用紙サイズ「A4」、余白「なし」または「最小」を選ぶと綺麗に出力されます。
+          </div>
+
+          <div id="print-preview-list" class="flex flex-wrap gap-2.5 p-4 bg-gray-50 rounded border border-gray-200 max-h-[600px] overflow-y-auto">
+            <!-- プレビュー用シールがここに並ぶ -->
+          </div>
         </div>
       </div>
     `;
@@ -84,13 +110,20 @@ const PrinterView = {
       });
     });
     
-    // 印刷生成処理
+    // プレビュー生成処理
     document.getElementById('btn-generate-print').addEventListener('click', () => {
       const mode = document.querySelector('input[name="print-mode"]:checked').value;
       const copies = parseInt(document.getElementById('print-copies').value, 10) || 1;
       
       const printArea = document.getElementById('print-area');
-      printArea.innerHTML = ''; // clear
+      const previewList = document.getElementById('print-preview-list');
+      const previewContainer = document.getElementById('print-preview-container');
+      const previewCount = document.getElementById('print-preview-count');
+      
+      printArea.innerHTML = '';
+      previewList.innerHTML = '';
+
+      let totalStickers = 0;
 
       if (mode === 'by-assignment') {
         const assignmentId = document.getElementById('print-assignment-select').value;
@@ -104,7 +137,9 @@ const PrinterView = {
         page.className = 'print-page flex flex-wrap gap-2 content-start';
         students.forEach(student => {
           for (let i = 0; i < copies; i++) {
+            totalStickers++;
             page.appendChild(PrinterView.createSticker(student, assignment));
+            previewList.appendChild(PrinterView.createSticker(student, assignment));
           }
         });
         printArea.appendChild(page);
@@ -122,12 +157,13 @@ const PrinterView = {
           
           students.forEach((student, index) => {
             const page = document.createElement('div');
-            // 全児童を出力する場合は児童ごとに改ページする
             page.className = 'print-page flex flex-wrap gap-2 content-start' + (index > 0 ? ' break-before-page' : '');
             
             assignments.forEach(assignment => {
               for (let i = 0; i < copies; i++) {
+                totalStickers++;
                 page.appendChild(PrinterView.createSticker(student, assignment));
+                previewList.appendChild(PrinterView.createSticker(student, assignment));
               }
             });
             printArea.appendChild(page);
@@ -138,17 +174,27 @@ const PrinterView = {
           page.className = 'print-page flex flex-wrap gap-2 content-start';
           assignments.forEach(assignment => {
             for (let i = 0; i < copies; i++) {
+              totalStickers++;
               page.appendChild(PrinterView.createSticker(student, assignment));
+              previewList.appendChild(PrinterView.createSticker(student, assignment));
             }
           });
           printArea.appendChild(page);
         }
       }
+
+      previewCount.textContent = `合計 ${totalStickers} 枚のQRシールが生成されました。確認後、「この内容で印刷する」を押してください。`;
+      previewContainer.classList.remove('hidden');
+      lucide.createIcons({ root: previewContainer });
       
-      // Delay printing to allow QR rendering
-      setTimeout(() => {
-        window.print();
-      }, 500);
+      // プレビュー位置までスムーズにスクロール
+      previewContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      utils.showToast(`${totalStickers}枚のQRシールを生成しました`);
+    });
+
+    // 実際の印刷実行処理
+    document.getElementById('btn-do-print').addEventListener('click', () => {
+      window.print();
     });
   },
 

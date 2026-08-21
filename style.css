@@ -1,17 +1,42 @@
 /* 印刷用スタイル */
 @media print {
+  html, body {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  
   body > *:not(#print-area) {
     display: none !important;
   }
+  
   #print-area {
     display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
+  
   @page {
-    margin: 0;
+    size: A4 portrait;
+    margin: 8mm;
   }
+  
   .print-page {
-    padding: 10mm;
+    padding: 0 !important;
+    margin-bottom: 0 !important;
     page-break-after: always;
+    break-after: page;
+  }
+  
+  .break-before-page {
+    page-break-before: always;
+    break-before: page;
   }
 }
 
