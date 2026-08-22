@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- キャッシュ無効化（アップデートの即時反映用） -->
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>和田小宿題チェッカー</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#0ea5e9', // sky-500
+            secondary: '#10b981', // emerald-500
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css?v=2.2">
+  
+  <!-- Libraries -->
+  <!-- PapaParse for CSV -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- QRCode.js for generating QR -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Html5-Qrcode for scanning -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <!-- Firebase Firestore -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans h-screen flex flex-col overflow-hidden">
+  
+  <!-- Header -->
+  <header class="bg-white shadow-sm z-10 flex-shrink-0">
+    <div class="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-2 md:h-16 flex flex-col md:flex-row items-center justify-between gap-2 md:gap-0">
+      <div class="flex items-center gap-2 w-full md:w-auto justify-center md:justify-start">
+        <i data-lucide="book-check" class="w-5 h-5 md:w-6 md:h-6 text-primary"></i>
+        <h1 class="text-base md:text-xl font-bold text-gray-900">和田小宿題チェッカー</h1>
+      </div>
+      <nav class="flex gap-1 md:gap-4 w-full md:w-auto justify-center overflow-x-auto" id="main-nav">
+        <!-- Nav buttons injected by JS -->
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-auto bg-gray-50 p-4 relative" id="app-content">
+    <!-- Views injected here -->
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-gray-200 flex-shrink-0">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center text-xs text-gray-500">
+      <div>作成者: 黒田先生</div>
+      <div class="text-red-400">異動後の保守点検は対応できません</div>
+    </div>
+  </footer>
+
+  <!-- Print Area (Hidden in normal view) -->
+  <div id="print-area" class="hidden"></div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-16 left-1/2 transform -translate-x-1/2 flex flex-col gap-2 z-50 pointer-events-none"></div>
+
+  <!-- App Scripts -->
+  <script src="firebase-sync.js?v=2.6"></script>
+  <script src="store.js?v=2.6"></script>
+  <script src="components.js?v=2.6"></script>
+  <script src="views/dashboard.js?v=2.6"></script>
+  <script src="views/master.js?v=2.6"></script>
+  <script src="views/printer.js?v=2.6"></script>
+  <script src="views/history.js?v=2.6"></script>
+  <script src="app.js?v=2.6"></script>
+</body>
+</html>
