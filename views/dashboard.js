@@ -5,6 +5,8 @@ let dashNativeAnimId = null;
 let isDashNativeScanning = false;
 let dashScanSession = 0; // スキャナー起動ごとの世代番号。画面離脱後に起動完了したカメラを止めるために使う
 let dashDateTimer = null;
+let dashWasmReady = null; // WASM版ZXingの読み込み（1回だけ行い、結果を使い回す）
+const WASM_SCAN_AREA = 0.8; // 映像の短辺に対する読み取り枠の大きさ
 
 const DashboardView = {
   _renderedDate: null,
@@ -357,7 +359,9 @@ const DashboardView = {
         const onScanSuccess = (decodedText) => {
           const now = Date.now();
           if (decodedText === lastScannedText && now - lastScannedTime < 1500) {
-            return; // 1.5秒以内の同一QR文字列は重複とみなす
+            // 同じQRが映り続けている間は反応しない（枠から1.5秒以上外れてから再度かざすと反応）
+            lastScannedTime = now;
+            return;
           }
           lastScannedText = decodedText;
           lastScannedTime = now;
@@ -428,6 +432,7 @@ const DashboardView = {
           // （同じ組み合わせでもQRの生データ表記が異なるケースで二重反応するのを防ぐ）
           const scanKey = `${studentId}::${assignmentId}`;
           if (scanKey === lastScannedKey && now - lastScannedKeyTime < 1500) {
+            lastScannedKeyTime = now;
             return;
           }
           lastScannedKey = scanKey;
@@ -476,25 +481,60 @@ const DashboardView = {
           }
         };
 
-        // 1. 最速のネイティブ BarcodeDetector（GPU/NPU 60fps）を最優先で試行
-        // ※ iPad(Safari)には BarcodeDetector が無いため、常に 2. の互換スキャナーが使われる
+        // 高速エンジンの選択:
+        //  1. ブラウザ内蔵の BarcodeDetector（Chrome / Android など）
+        //  2. WASM版ZXing（iPad Safari はこちら。高解像度の映像を縮小せずに解析するため、
+        //     遠め・多少のブレでも読め、カメラのコマ数（毎秒約30回）で試行できる）
+        //  3. どちらも使えない場合（WASMの読み込み失敗など）は、下の html5-qrcode 互換スキャナー
+        let detectFrame = null;
+        let engineName = '';
+
         let nativeSupported = false;
         if ('BarcodeDetector' in window) {
           try {
             const formats = await BarcodeDetector.getSupportedFormats();
-            if (formats.includes('qr_code')) {
-              nativeSupported = true;
-            }
+            nativeSupported = formats.includes('qr_code');
           } catch(e) {}
         }
 
         if (nativeSupported) {
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+          detectFrame = async (video) => {
+            const codes = await detector.detect(video);
+            return codes && codes.length > 0 ? codes[0].rawValue : null;
+          };
+          engineName = 'BarcodeDetector';
+        } else {
+          readerElement.innerHTML = `<div class="absolute inset-0 flex items-center justify-center text-xs text-gray-300">スキャナーを準備中…</div>`;
+          if (await DashboardView.loadWasmEngine()) {
+            const cropCanvas = document.createElement('canvas');
+            const cropCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
+            const readerOptions = { formats: ['QRCode'], tryHarder: true, maxNumberOfSymbols: 1 };
+            detectFrame = async (video) => {
+              // 映像中央の正方形（短辺の80% = 画面のガイド枠）を等倍で切り出して解析
+              const vw = video.videoWidth, vh = video.videoHeight;
+              if (!vw || !vh) return null;
+              const side = Math.round(Math.min(vw, vh) * WASM_SCAN_AREA);
+              if (cropCanvas.width !== side) {
+                cropCanvas.width = side;
+                cropCanvas.height = side;
+              }
+              cropCtx.drawImage(video, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, side, side);
+              const results = await ZXingWASM.readBarcodes(cropCtx.getImageData(0, 0, side, side), readerOptions);
+              const hit = results.find(r => r.isValid && r.text);
+              return hit ? hit.text : null;
+            };
+            engineName = 'ZXing WASM';
+          }
+          if (isStale()) return;
+        }
+
+        if (detectFrame) {
           try {
             readerElement.innerHTML = `
               <video id="dash-native-video" playsinline autoplay muted class="w-full h-full object-cover"></video>
-              <div class="absolute inset-0 pointer-events-none border border-primary/30 m-3 rounded flex items-center justify-center">
-                <div class="w-full h-0.5 bg-primary/70 shadow-[0_0_8px_rgba(14,165,233,0.8)] animate-pulse"></div>
-              </div>
+              <div class="absolute pointer-events-none border-2 border-white/80 rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]"
+                   style="top:${(1 - WASM_SCAN_AREA) * 50}%; height:${WASM_SCAN_AREA * 100}%; aspect-ratio:1/1; left:50%; transform:translateX(-50%);"></div>
             `;
             const video = document.getElementById('dash-native-video');
 
@@ -511,43 +551,39 @@ const DashboardView = {
             await video.play();
             if (isStale()) return;
 
-            const detector = new BarcodeDetector({ formats: ['qr_code'] });
             isDashNativeScanning = true;
 
+            // 解析が終わるたびに次の映像フレームで再試行する（待ち時間を挟まない）
             let isProcessing = false;
-            const loop = async () => {
+            const scheduleNext = () => {
               if (!isDashNativeScanning) return;
-              if (!isProcessing && video.readyState >= 2) {
-                isProcessing = true;
-                try {
-                  const codes = await detector.detect(video);
-                  if (codes && codes.length > 0 && codes[0].rawValue) {
-                    onScanSuccess(codes[0].rawValue);
-                  }
-                } catch(err) {
-                } finally {
-                  isProcessing = false;
-                }
-              }
-
               if ('requestVideoFrameCallback' in video) {
                 video.requestVideoFrameCallback(loop);
               } else {
                 dashNativeAnimId = requestAnimationFrame(loop);
               }
             };
+            const loop = async () => {
+              if (!isDashNativeScanning) return;
+              if (!isProcessing && video.readyState >= 2) {
+                isProcessing = true;
+                try {
+                  const text = await detectFrame(video);
+                  if (text && isDashNativeScanning) onScanSuccess(text);
+                } catch(err) {
+                } finally {
+                  isProcessing = false;
+                }
+              }
+              scheduleNext();
+            };
+            scheduleNext();
 
-            if ('requestVideoFrameCallback' in video) {
-              video.requestVideoFrameCallback(loop);
-            } else {
-              dashNativeAnimId = requestAnimationFrame(loop);
-            }
-
-            console.log('⚡ 最速ハードウェアスキャナー (BarcodeDetector 60fps) 稼働中');
+            console.log(`⚡ 高速スキャナー (${engineName}) 稼働中`);
             DashboardView.setEngineBadge('native');
             return;
           } catch(err) {
-            console.warn('Native BarcodeDetector start failed, falling back to Html5Qrcode', err);
+            console.warn(`${engineName} scanner start failed, falling back to Html5Qrcode`, err);
             await DashboardView.stopScanner();
             if (isStale()) return;
           }
@@ -962,6 +998,35 @@ const DashboardView = {
         el.classList.add('hidden');
       }
     }, 2500);
+  },
+
+  // WASM版ZXingを準備する。成功なら true。
+  // .wasm は外部CDNではなくこのサイトに同梱したものを使う（学校のネットワーク制限対策）。
+  // 読み込めない・遅すぎる場合は false を返し、従来の互換スキャナーで動かす。
+  loadWasmEngine() {
+    if (!dashWasmReady) {
+      dashWasmReady = (async () => {
+        if (typeof ZXingWASM === 'undefined' || typeof WebAssembly === 'undefined') return false;
+        const wasmUrl = new URL('vendor/zxing-wasm/zxing_reader.wasm?v=3.1.3', location.href).href;
+        const prepared = ZXingWASM.prepareZXingModule({
+          overrides: { locateFile: (path, prefix) => path.endsWith('.wasm') ? wasmUrl : prefix + path },
+          fireImmediately: true
+        });
+        let timer;
+        const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 10000); });
+        try {
+          await Promise.race([prepared, timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
+        return true;
+      })().catch(e => {
+        console.warn('ZXing WASM の読み込みに失敗したため、互換スキャナーを使います', e);
+        dashWasmReady = null; // 次回ダッシュボードを開いたときに再挑戦する
+        return false;
+      });
+    }
+    return dashWasmReady;
   },
 
   // カメラとスキャナーを止める（停止完了まで待てるよう Promise を返す）
