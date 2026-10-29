@@ -113,7 +113,7 @@ const PrinterView = {
     // プレビュー生成処理
     document.getElementById('btn-generate-print').addEventListener('click', () => {
       const mode = document.querySelector('input[name="print-mode"]:checked').value;
-      const copies = parseInt(document.getElementById('print-copies').value, 10) || 1;
+      const copies = Math.min(10, Math.max(1, parseInt(document.getElementById('print-copies').value, 10) || 1));
       
       const printArea = document.getElementById('print-area');
       const previewList = document.getElementById('print-preview-list');

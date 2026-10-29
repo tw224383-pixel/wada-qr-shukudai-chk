@@ -3,65 +3,23 @@ let dashHtml5QrcodeScanner = null;
 let dashNativeStream = null;
 let dashNativeAnimId = null;
 let isDashNativeScanning = false;
+let dashScanSession = 0; // スキャナー起動ごとの世代番号。画面離脱後に起動完了したカメラを止めるために使う
+let dashDateTimer = null;
 
 const DashboardView = {
+  _renderedDate: null,
+
   render() {
     const data = store.data;
-    
-    // Default to 'all' if no active assignment, otherwise use the stored one
-    let activeAssignmentId = localStorage.getItem('activeAssignmentId');
-    if (!activeAssignmentId && data.assignments.length > 0) {
-      activeAssignmentId = 'all';
-    }
-    
-    // 今日の宿題設定を取得（未設定ならすべてを選択状態にする）
-    let todayAssignments = [];
-    try {
-      const saved = localStorage.getItem('todayAssignments');
-      if (saved) todayAssignments = JSON.parse(saved);
-      else todayAssignments = data.assignments.map(a => a.id);
-    } catch(e) {
-      todayAssignments = data.assignments.map(a => a.id);
-    }
+    DashboardView._renderedDate = getLocalDateString();
 
     let mainContentHtml = '<div class="text-gray-500">提出物が登録されていません</div>';
-    
+
     if (data.assignments.length > 0) {
-      const isAllMode = activeAssignmentId === 'all';
-      
-      // 表示対象の提出物リストを決定
-      const targetAssignments = isAllMode 
-        ? data.assignments.filter(a => todayAssignments.includes(a.id))
-        : data.assignments.filter(a => a.id === activeAssignmentId);
-
-      // テーブルヘッダーの生成
-      let thHtml = targetAssignments.map(a => `<th class="px-2 py-2 text-center font-medium text-gray-500 whitespace-nowrap text-xs min-w-[4rem] max-w-[8rem] truncate" title="${utils.escapeHTML(a.title)}">${utils.escapeHTML(a.title)}</th>`).join('');
-      if (targetAssignments.length === 0) thHtml = `<th class="px-2 py-2 text-center font-medium text-gray-500 whitespace-nowrap text-xs">対象の提出物がありません</th>`;
-
-      // テーブルボディの生成
-      let tbodyHtml = data.students.map(student => {
-        let cellsHtml = targetAssignments.map(a => {
-          const sub = data.submissions.find(s => s.studentId === student.id && s.assignmentId === a.id);
-          const status = sub ? sub.status : '';
-          return `
-            <td class="px-2 py-2 text-center">
-              <button onclick="window.dashToggleStatus('${student.id}', '${a.id}')" id="status-btn-${student.id}-${a.id}" class="w-10 h-10 md:w-12 md:h-10 rounded-md font-bold text-base shadow-sm border focus:outline-none transition-colors ${getStatusClass(status)}">
-                ${getStatusText(status)}
-              </button>
-            </td>
-          `;
-        }).join('');
-
-        if (targetAssignments.length === 0) cellsHtml = `<td class="px-2 py-2 text-center text-gray-400">-</td>`;
-
-        return `
-          <tr id="row-${student.id}" class="transition-colors hover:bg-gray-50">
-            <td class="px-4 py-3 whitespace-nowrap text-gray-600">${utils.escapeHTML(student.number)}</td>
-            <td class="px-4 py-3 font-medium whitespace-nowrap sticky left-0 bg-white z-10 drop-shadow-sm md:drop-shadow-none md:static">${utils.escapeHTML(student.name)}</td>
-            ${cellsHtml}
-          </tr>
-        `;
-      }).join('');
+      const activeMode = DashboardView.getActiveMode();
+      const isAllMode = activeMode === 'all';
+      const todayAssignments = DashboardView.getTodayAssignmentIds();
+      const targetAssignments = DashboardView.getTargetAssignments();
 
       // 今日の宿題設定UI
       const todaySettingsHtml = `
@@ -79,17 +37,17 @@ const DashboardView = {
           </div>
         </div>
       `;
-        
+
       mainContentHtml = `
         <div class="flex flex-col md:flex-row gap-4 h-full">
           <!-- 左側/上部: スキャナーと統計 -->
           <div class="w-full md:w-1/3 flex flex-col gap-4">
-            
+
             <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
               <label class="block text-sm font-bold text-gray-700 mb-2">表示対象</label>
               <select id="dash-assignment-select" class="w-full border-gray-300 rounded-md shadow-sm border p-2 bg-gray-50 font-bold text-primary">
                 <option value="all" ${isAllMode ? 'selected' : ''}>-- すべて (今日の宿題) --</option>
-                ${data.assignments.map(a => `<option value="${a.id}" ${a.id === activeAssignmentId ? 'selected' : ''}>${utils.escapeHTML(a.title)}</option>`).join('')}
+                ${data.assignments.map(a => `<option value="${a.id}" ${a.id === activeMode ? 'selected' : ''}>${utils.escapeHTML(a.title)}</option>`).join('')}
               </select>
               <div id="dash-today-settings-container" class="${isAllMode ? '' : 'hidden'}">
                 ${todaySettingsHtml}
@@ -114,7 +72,7 @@ const DashboardView = {
                     </label>
                   </div>
               </div>
-              
+
               <div class="mb-2 flex items-center gap-2 text-xs">
                  <span class="text-gray-600 font-medium whitespace-nowrap">成功音:</span>
                  <select id="dash-sound-select" class="border border-gray-300 rounded p-1 bg-gray-50 flex-1">
@@ -134,7 +92,7 @@ const DashboardView = {
               <div id="dash-qr-reader" class="w-full bg-black rounded overflow-hidden relative min-h-[200px] max-h-[300px]"></div>
               <div id="dash-scan-result" class="mt-2 p-2 rounded text-center font-bold text-sm hidden"></div>
             </div>
-            
+
             <!-- 統計 -->
             <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex-shrink-0">
               <h3 class="font-bold text-gray-800 mb-2 flex items-center gap-2"><i data-lucide="pie-chart" class="w-5 h-5"></i>状況サマリー</h3>
@@ -144,19 +102,22 @@ const DashboardView = {
             </div>
 
           </div>
-          
+
           <!-- 右側: 名簿一覧と未提出リスト -->
           <div class="w-full md:w-2/3 flex flex-col gap-4 h-[60vh] md:h-[calc(100vh-100px)] min-h-[500px]">
-            
+
             <!-- 表コンテナ -->
             <div class="bg-white rounded-lg shadow-sm overflow-hidden flex flex-col flex-1 border border-gray-100">
                 <div class="p-2 md:p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0 flex-wrap gap-2">
-                  <h2 class="font-bold text-gray-800 flex items-center gap-2 text-sm"><i data-lucide="table" class="w-4 h-4"></i>提出一覧</h2>
+                  <h2 class="font-bold text-gray-800 flex items-center gap-2 text-sm">
+                    <i data-lucide="table" class="w-4 h-4"></i>提出一覧
+                    <span id="dash-date-label" class="text-xs font-bold text-primary bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5">${DashboardView.formatDateLabel(DashboardView._renderedDate)}</span>
+                  </h2>
                   <div class="flex items-center gap-2">
                     <button id="dash-lock-btn" onclick="window.dashToggleLock()" class="text-[10px] bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors border border-red-200 shadow-sm">
                       <i data-lucide="lock" class="w-3 h-3" id="dash-lock-icon"></i> <span id="dash-lock-text">編集ロック中</span>
                     </button>
-                    
+
                     <!-- 無担モード（クラス選択） -->
                     <div class="flex items-center bg-indigo-50 border border-indigo-200 rounded px-2 py-1">
                       <i data-lucide="users" class="w-3 h-3 text-indigo-600 mr-1"></i>
@@ -171,14 +132,12 @@ const DashboardView = {
                 <div class="overflow-auto flex-1 relative bg-white">
                   <table class="min-w-full divide-y divide-gray-200 text-sm">
                   <thead class="bg-gray-100 sticky top-0 z-20 shadow-sm">
-                    <tr>
-                      <th class="px-4 py-2 text-left font-medium text-gray-500 w-12 whitespace-nowrap">出席番号</th>
-                      <th class="px-4 py-2 text-left font-medium text-gray-500 sticky left-0 bg-gray-100 z-30 drop-shadow-sm md:drop-shadow-none md:static whitespace-nowrap">氏名</th>
-                      ${thHtml}
+                    <tr id="dash-thead-row">
+                      ${DashboardView.buildHeadHtml(targetAssignments)}
                     </tr>
                   </thead>
                   <tbody class="bg-white divide-y divide-gray-200" id="dash-students-tbody">
-                    ${tbodyHtml}
+                    ${DashboardView.buildBodyHtml(targetAssignments)}
                   </tbody>
                 </table>
                 </div>
@@ -229,11 +188,11 @@ const DashboardView = {
       </div>
     `;
   },
-  
+
   afterRender() {
     lucide.createIcons();
     const select = document.getElementById('dash-assignment-select');
-    
+
     if (select) {
       select.addEventListener('change', (e) => {
         localStorage.setItem('activeAssignmentId', e.target.value);
@@ -246,7 +205,7 @@ const DashboardView = {
     hwCheckboxes.forEach(cb => {
       cb.addEventListener('change', () => {
         const checkedIds = Array.from(document.querySelectorAll('.today-hw-checkbox:checked')).map(el => el.value);
-        localStorage.setItem('todayAssignments', JSON.stringify(checkedIds));
+        DashboardView.saveTodayAssignmentIds(checkedIds);
         DashboardView.updateTableAndStats();
       });
     });
@@ -279,19 +238,14 @@ const DashboardView = {
     // 無担モードのクラスリスト構築とリスナー
     const mutanSelect = document.getElementById('dash-mutan-select');
     if (mutanSelect) {
-      const classes = [...new Set(store.data.students.map(s => s.class).filter(Boolean))].sort();
-      classes.forEach(c => {
+      DashboardView.getClasses().forEach(c => {
         const opt = document.createElement('option');
         opt.value = c;
         opt.textContent = c;
         mutanSelect.appendChild(opt);
       });
-      
-      const savedMutan = localStorage.getItem('mutanModeClass');
-      if (savedMutan && classes.includes(savedMutan)) {
-        mutanSelect.value = savedMutan;
-      }
-      
+      mutanSelect.value = DashboardView.getMutanClass();
+
       mutanSelect.addEventListener('change', (e) => {
         localStorage.setItem('mutanModeClass', e.target.value);
         DashboardView.updateTableAndStats();
@@ -300,6 +254,10 @@ const DashboardView = {
 
     DashboardView.updateStatsUI();
     DashboardView.updateUnsubmittedListUI();
+
+    // 画面を開いたまま日付が変わった場合に、表を新しい日の状態へ切り替える
+    if (dashDateTimer) clearInterval(dashDateTimer);
+    dashDateTimer = setInterval(() => DashboardView.checkDateRollover(), 30000);
 
     window.isStatusEditUnlocked = false;
     window.showOnlyUnsubmitted = false;
@@ -350,13 +308,18 @@ const DashboardView = {
       DashboardView.updateUnsubmittedListUI();
     };
 
-    // グローバルトグル関数
+    // グローバルトグル関数（今日の記録のみを切り替える）
     window.dashToggleStatus = (studentId, assignmentId) => {
       if (!window.isStatusEditUnlocked) {
         utils.showToast('編集ロックが掛かっています。「編集ロック中」ボタンを押して解除してください。', 'warning');
         return;
       }
       if (!assignmentId) return;
+      if (DashboardView.checkDateRollover()) {
+        // 日付が変わっていたら、前日の表のまま誤って操作しないよう表の更新だけ行う
+        utils.showToast('日付が変わったため、今日の提出一覧に切り替えました', 'warning');
+        return;
+      }
       const newStatus = store.toggleSubmissionStatus(studentId, assignmentId);
       DashboardView.updateRowUI(studentId, assignmentId, newStatus);
       DashboardView.updateStatsUI();
@@ -376,13 +339,15 @@ const DashboardView = {
     // Initialize scanner
     setTimeout(() => {
       if (!document.getElementById('dash-qr-reader')) return;
-      
-      const startScanner = async () => {
-        const readerElement = document.getElementById('dash-qr-reader');
-        if (!readerElement) return;
 
-        // すでにインスタンスやストリームがあればクリーンアップ
-        DashboardView.destroy();
+      const startScanner = async () => {
+        const session = ++dashScanSession;
+        const isStale = () => session !== dashScanSession || !document.getElementById('dash-qr-reader');
+
+        // すでにインスタンスやストリームがあれば、停止完了を待ってから新しく起動する
+        await DashboardView.stopScanner();
+        if (isStale()) return;
+        const readerElement = document.getElementById('dash-qr-reader');
 
         let lastScannedText = "";
         let lastScannedTime = 0;
@@ -397,123 +362,122 @@ const DashboardView = {
           lastScannedText = decodedText;
           lastScannedTime = now;
 
-          const mode = document.getElementById('dash-assignment-select')?.value;
-          if (!mode) return;
+          if (!document.getElementById('dash-assignment-select')) return;
           const enableAudio = document.getElementById('dash-audio-toggle')?.checked;
           const enableVibe = document.getElementById('dash-vibe-toggle')?.checked;
           const soundIndex = document.getElementById('dash-sound-select')?.value || '1';
-          
-          try {
-            let studentId = null;
-            let assignmentId = null;
 
-            const text = (decodedText || '').trim();
+          // 日付が変わっていれば、記録する前に表を新しい日の状態へ切り替える
+          DashboardView.checkDateRollover();
 
-            if (text.startsWith('{')) {
-              // 1. 従来形式 (JSON: {"s":"...","a":"..."})
-              try {
-                const qrData = JSON.parse(text);
-                studentId = qrData.s;
-                assignmentId = qrData.a;
-              } catch(e) {}
-            } else if (text.includes(':')) {
-              // 2. コロン区切り形式 (studentId:assignmentId または W:studentId:assignmentId)
-              let raw = text;
-              if (raw.startsWith('W:')) raw = raw.substring(2);
-              const colonIdx = raw.indexOf(':');
-              if (colonIdx !== -1) {
-                studentId = raw.substring(0, colonIdx);
-                assignmentId = raw.substring(colonIdx + 1);
-              }
+          let studentId = null;
+          let assignmentId = null;
+          const text = (decodedText || '').trim();
+
+          if (text.startsWith('{')) {
+            // 1. 従来形式 (JSON: {"s":"...","a":"..."})
+            try {
+              const qrData = JSON.parse(text);
+              studentId = qrData.s;
+              assignmentId = qrData.a;
+            } catch(e) {}
+          } else if (text.includes(':')) {
+            // 2. コロン区切り形式 (studentId:assignmentId または W:studentId:assignmentId)
+            let raw = text;
+            if (raw.startsWith('W:')) raw = raw.substring(2);
+            const colonIdx = raw.indexOf(':');
+            if (colonIdx !== -1) {
+              studentId = raw.substring(0, colonIdx);
+              assignmentId = raw.substring(colonIdx + 1);
             }
+          }
 
-            // 3. 安全フォールバック（登録済みデータとの直接突合マッチング）
-            if (!studentId || !assignmentId || !store.data.students.some(s => s.id === studentId) || !store.data.assignments.some(a => a.id === assignmentId)) {
-              for (const s of store.data.students) {
-                if (text.startsWith(s.id)) {
-                  const rest = text.substring(s.id.length).replace(/^[:_]/, '');
-                  const matchedA = store.data.assignments.find(a => a.id === rest);
-                  if (matchedA) {
-                    studentId = s.id;
-                    assignmentId = matchedA.id;
-                    break;
-                  }
+          // 3. 安全フォールバック（登録済みデータとの直接突合マッチング）
+          if (!studentId || !assignmentId || !store.data.students.some(s => s.id === studentId) || !store.data.assignments.some(a => a.id === assignmentId)) {
+            for (const s of store.data.students) {
+              if (text.startsWith(s.id)) {
+                const rest = text.substring(s.id.length).replace(/^[:_]/, '');
+                const matchedA = store.data.assignments.find(a => a.id === rest);
+                if (matchedA) {
+                  studentId = s.id;
+                  assignmentId = matchedA.id;
+                  break;
                 }
               }
             }
+          }
 
-            if (!studentId || !assignmentId) {
-              throw new Error("Invalid Format");
-            }
-            
-            const student = store.data.students.find(s => s.id === studentId);
-            const assignment = store.data.assignments.find(a => a.id === assignmentId);
-
-            if (!student || !assignment) {
-              utils.playBeep('error');
-              if (enableVibe) utils.vibrate([200, 100, 200]);
-              DashboardView.showScanResult(`未登録のQRです`, 'error');
-              return;
-            }
-
-            // 解析後の実体（児童×提出物）ベースでも重複を防止する
-            // （同じ組み合わせでもQRの生データ表記が異なるケースで二重反応するのを防ぐ）
-            const scanKey = `${studentId}::${assignmentId}`;
-            if (scanKey === lastScannedKey && now - lastScannedKeyTime < 1500) {
-              return;
-            }
-            lastScannedKey = scanKey;
-            lastScannedKeyTime = now;
-
-            // --- スキャン対象の判定 ---
-            let isTarget = false;
-            if (mode === 'all') {
-              const saved = localStorage.getItem('todayAssignments');
-              const todayAssings = saved ? JSON.parse(saved) : store.data.assignments.map(a=>a.id);
-              if (todayAssings.includes(assignmentId)) isTarget = true;
-            } else {
-              if (mode === assignmentId) isTarget = true;
-            }
-
-            if (!isTarget) {
-              utils.playBeep('error');
-              if (enableVibe) utils.vibrate([200, 100, 200]);
-              DashboardView.showScanResult(`【対象外】${utils.escapeHTML(assignment.title)}`, 'error');
-              if (enableAudio) utils.speak(`それは違う宿題です`);
-              return;
-            }
-
-            // 対象なので受理する
-            const success = store.addSubmission(studentId, assignmentId, 'submitted');
-            
-            if (success) {
-              utils.playSuccessSound(soundIndex);
-              if (enableVibe) utils.vibrate(200);
-              DashboardView.showScanResult(`【受付】 ${utils.escapeHTML(student.name)}さん`, 'success');
-              if (enableAudio) utils.speak(`${student.number}番、提出しました`);
-              
-              // UI反映
-              DashboardView.updateRowUI(studentId, assignmentId, 'submitted');
-              DashboardView.highlightRow(studentId);
-              DashboardView.updateStatsUI();
-              DashboardView.updateUnsubmittedListUI();
-
-            } else {
-              // すでに〇の場合
-              utils.playBeep('warning');
-              if (enableVibe) utils.vibrate([100, 50, 100]);
-              DashboardView.showScanResult(`【重複】 ${utils.escapeHTML(student.name)}さん済`, 'warning');
-              if (enableAudio) utils.speak(`提出済みです`);
-              DashboardView.highlightRow(studentId);
-            }
-
-          } catch(e) {
+          if (!studentId || !assignmentId) {
             utils.playBeep('error');
+            if (enableVibe) utils.vibrate([200, 100, 200]);
             DashboardView.showScanResult(`無効なQR`, 'error');
+            return;
+          }
+
+          const student = store.data.students.find(s => s.id === studentId);
+          const assignment = store.data.assignments.find(a => a.id === assignmentId);
+
+          if (!student || !assignment) {
+            utils.playBeep('error');
+            if (enableVibe) utils.vibrate([200, 100, 200]);
+            DashboardView.showScanResult(`未登録のQRです`, 'error');
+            return;
+          }
+
+          // 解析後の実体（児童×提出物）ベースでも重複を防止する
+          // （同じ組み合わせでもQRの生データ表記が異なるケースで二重反応するのを防ぐ）
+          const scanKey = `${studentId}::${assignmentId}`;
+          if (scanKey === lastScannedKey && now - lastScannedKeyTime < 1500) {
+            return;
+          }
+          lastScannedKey = scanKey;
+          lastScannedKeyTime = now;
+
+          // --- スキャン対象の判定（画面に表示されている提出物・クラスと一致させる） ---
+          if (!DashboardView.getTargetAssignments().some(a => a.id === assignmentId)) {
+            utils.playBeep('error');
+            if (enableVibe) utils.vibrate([200, 100, 200]);
+            DashboardView.showScanResult(`【対象外】${assignment.title}`, 'error');
+            if (enableAudio) utils.speak(`それは違う宿題です`);
+            return;
+          }
+
+          const mutanClass = DashboardView.getMutanClass();
+          if (mutanClass && student.class !== mutanClass) {
+            utils.playBeep('error');
+            if (enableVibe) utils.vibrate([200, 100, 200]);
+            DashboardView.showScanResult(`【対象外】${student.class || 'クラスなし'}の児童です`, 'error');
+            if (enableAudio) utils.speak(`ほかのクラスの児童です`);
+            return;
+          }
+
+          // 対象なので受理する（今日の記録として保存）
+          const success = store.addSubmission(studentId, assignmentId, 'submitted');
+
+          if (success) {
+            utils.playSuccessSound(soundIndex);
+            if (enableVibe) utils.vibrate(200);
+            DashboardView.showScanResult(`【受付】 ${student.name}さん`, 'success');
+            if (enableAudio) utils.speak(`${student.number}番、提出しました`);
+
+            // UI反映
+            DashboardView.updateRowUI(studentId, assignmentId, 'submitted');
+            DashboardView.highlightRow(studentId);
+            DashboardView.updateStatsUI();
+            DashboardView.updateUnsubmittedListUI();
+
+          } else {
+            // 今日すでに〇の場合
+            utils.playBeep('warning');
+            if (enableVibe) utils.vibrate([100, 50, 100]);
+            DashboardView.showScanResult(`【重複】 ${student.name}さん済`, 'warning');
+            if (enableAudio) utils.speak(`提出済みです`);
+            DashboardView.highlightRow(studentId);
           }
         };
 
         // 1. 最速のネイティブ BarcodeDetector（GPU/NPU 60fps）を最優先で試行
+        // ※ iPad(Safari)には BarcodeDetector が無いため、常に 2. の互換スキャナーが使われる
         let nativeSupported = false;
         if ('BarcodeDetector' in window) {
           try {
@@ -533,14 +497,19 @@ const DashboardView = {
               </div>
             `;
             const video = document.getElementById('dash-native-video');
-            
+
             const stream = await navigator.mediaDevices.getUserMedia({
               video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
               audio: false
             });
+            if (isStale()) {
+              stream.getTracks().forEach(t => t.stop()); // 起動中に画面を離れた場合はカメラを止める
+              return;
+            }
             dashNativeStream = stream;
             video.srcObject = stream;
             await video.play();
+            if (isStale()) return;
 
             const detector = new BarcodeDetector({ formats: ['qr_code'] });
             isDashNativeScanning = true;
@@ -579,19 +548,20 @@ const DashboardView = {
             return;
           } catch(err) {
             console.warn('Native BarcodeDetector start failed, falling back to Html5Qrcode', err);
-            DashboardView.destroy();
+            await DashboardView.stopScanner();
+            if (isStale()) return;
           }
         }
 
         // 2. フォールバック: Html5Qrcode（互換スキャナー）
         readerElement.innerHTML = '';
         DashboardView.setEngineBadge('fallback');
-        dashHtml5QrcodeScanner = new Html5Qrcode("dash-qr-reader");
+        const scanner = new Html5Qrcode("dash-qr-reader");
+        dashHtml5QrcodeScanner = scanner;
 
         const onScanError = (error) => {};
 
         // 読み取り枠を絞ることでjsQRの1フレームあたりの処理量を削減し、体感速度を上げる
-        // (iPad Safariには BarcodeDetector が存在しないため、実運用では常にこのエンジンが使われる)
         const scannerConfig = {
           fps: 25,
           qrbox: (viewfinderWidth, viewfinderHeight) => {
@@ -600,7 +570,7 @@ const DashboardView = {
             return { width: edge, height: edge };
           },
           formatsToSupport: [ 0 ],
-          // 背面カメラ運用が前提のため、左右反転画像での二重デコードを無効化し高速化（フロントカメラ時は反転画像の解析を省略）
+          // 背面カメラ運用が前提のため、左右反転画像での二重デコードを無効化し高速化
           disableFlip: true,
           experimentalFeatures: {
             useBarCodeDetectorIfSupported: true
@@ -614,12 +584,16 @@ const DashboardView = {
             ...config,
             videoConstraints: { ...videoConstraints, width: { ideal: 960 }, height: { ideal: 540 } }
           };
-          dashHtml5QrcodeScanner.start(
+          scanner.start(
             videoConstraints,
             configWithSize,
             onScanSuccess,
             onScanError
-          ).catch(e => {
+          ).then(() => {
+            // 起動を待っている間に画面を離れていたら、ここでカメラを止める
+            if (isStale()) scanner.stop().then(() => scanner.clear()).catch(() => {});
+          }).catch(e => {
+            if (isStale()) return;
             console.warn('Camera start failed, trying fallback', e);
             if (fallbackFn) fallbackFn();
             else DashboardView.showScanResult("カメラの起動に失敗しました", "error");
@@ -657,12 +631,63 @@ const DashboardView = {
     lucide.createIcons({ root: btn });
   },
 
+  // --- 表示条件（画面表示・統計・スキャン判定のすべてがここを参照する） ---
+
+  // 選択中の提出物ID。保存値が削除済みの提出物を指している場合は「すべて」に戻す
+  getActiveMode() {
+    const saved = localStorage.getItem('activeAssignmentId');
+    if (saved && saved !== 'all' && store.data.assignments.some(a => a.id === saved)) return saved;
+    return 'all';
+  },
+
+  // 「すべて」に含める提出物ID。
+  // 設定保存後に追加された提出物は、チェックを外した覚えがないので自動的に含める。
+  getTodayAssignmentIds() {
+    const allIds = store.data.assignments.map(a => a.id);
+    let saved = null;
+    let known = null;
+    try {
+      saved = JSON.parse(localStorage.getItem('todayAssignments'));
+      known = JSON.parse(localStorage.getItem('todayAssignmentsKnown'));
+    } catch(e) {}
+    if (!Array.isArray(saved)) return allIds;
+    if (!Array.isArray(known)) {
+      // 旧バージョンからの移行: 現時点の提出物を「設定済み」とみなす
+      known = allIds;
+      localStorage.setItem('todayAssignmentsKnown', JSON.stringify(known));
+    }
+    return allIds.filter(id => saved.includes(id) || !known.includes(id));
+  },
+
+  saveTodayAssignmentIds(checkedIds) {
+    localStorage.setItem('todayAssignments', JSON.stringify(checkedIds));
+    localStorage.setItem('todayAssignmentsKnown', JSON.stringify(store.data.assignments.map(a => a.id)));
+  },
+
+  getTargetAssignments() {
+    const mode = DashboardView.getActiveMode();
+    if (mode === 'all') {
+      const todayIds = DashboardView.getTodayAssignmentIds();
+      return store.data.assignments.filter(a => todayIds.includes(a.id));
+    }
+    return store.data.assignments.filter(a => a.id === mode);
+  },
+
+  getClasses() {
+    return [...new Set(store.data.students.map(s => s.class).filter(Boolean))].sort();
+  },
+
+  // 無担モードのクラス。保存値のクラスが名簿から消えている場合は通常表示に戻す
+  getMutanClass() {
+    const saved = localStorage.getItem('mutanModeClass');
+    return saved && DashboardView.getClasses().includes(saved) ? saved : '';
+  },
+
   getDisplayStudents() {
-    const data = store.data;
-    const mutanClass = localStorage.getItem('mutanModeClass');
+    const mutanClass = DashboardView.getMutanClass();
     if (mutanClass) {
       // 指定クラスのみ抽出し、出席番号順（数値としてパースできれば数値比較、できなければ文字列比較）にソート
-      return data.students
+      return store.data.students
         .filter(s => s.class === mutanClass)
         .sort((a, b) => {
           const numA = parseInt(a.number, 10);
@@ -670,48 +695,49 @@ const DashboardView = {
           if (!isNaN(numA) && !isNaN(numB)) {
             return numA - numB;
           }
-          return a.number.localeCompare(b.number);
+          return String(a.number).localeCompare(String(b.number));
         });
     }
-    return data.students;
+    return store.data.students;
   },
 
-  updateTableAndStats() {
-    const data = store.data;
-    let activeAssignmentId = localStorage.getItem('activeAssignmentId') || 'all';
-    let todayAssignments = [];
-    try {
-      const saved = localStorage.getItem('todayAssignments');
-      todayAssignments = saved ? JSON.parse(saved) : data.assignments.map(a => a.id);
-    } catch(e) {
-      todayAssignments = data.assignments.map(a => a.id);
-    }
+  // 今日の提出状況 { "児童ID::提出物ID": status }（前日以前の記録は含めない）
+  getTodayStatusMap() {
+    const map = new Map();
+    store.getSubmissionsByDate().forEach(s => map.set(`${s.studentId}::${s.assignmentId}`, s.status));
+    return map;
+  },
 
-    const isAllMode = activeAssignmentId === 'all';
-    const targetAssignments = isAllMode 
-      ? data.assignments.filter(a => todayAssignments.includes(a.id))
-      : data.assignments.filter(a => a.id === activeAssignmentId);
+  formatDateLabel(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const wd = '日月火水木金土'[new Date(y, m - 1, d).getDay()];
+    return `${m}/${d}(${wd})`;
+  },
 
-    // Update table headers
+  // 表示中の日付が今日でなければ表を作り直す。作り直した場合は true
+  checkDateRollover() {
+    const today = getLocalDateString();
+    if (DashboardView._renderedDate === today) return false;
+    if (!document.getElementById('dash-students-tbody')) return false;
+    DashboardView.updateTableAndStats();
+    return true;
+  },
+
+  buildHeadHtml(targetAssignments) {
     let thHtml = targetAssignments.map(a => `<th class="px-2 py-2 text-center font-medium text-gray-500 whitespace-nowrap text-xs min-w-[4rem] max-w-[8rem] truncate" title="${utils.escapeHTML(a.title)}">${utils.escapeHTML(a.title)}</th>`).join('');
     if (targetAssignments.length === 0) thHtml = `<th class="px-2 py-2 text-center font-medium text-gray-500 whitespace-nowrap text-xs">対象の提出物がありません</th>`;
-    
-    const theadTr = document.querySelector('thead tr');
-    if (theadTr) {
-      theadTr.innerHTML = `
-        <th class="px-4 py-2 text-left font-medium text-gray-500 w-12 whitespace-nowrap">出席番号</th>
-        <th class="px-4 py-2 text-left font-medium text-gray-500 sticky left-0 bg-gray-100 z-30 drop-shadow-sm md:drop-shadow-none md:static whitespace-nowrap">氏名</th>
-        ${thHtml}
-      `;
-    }
+    return `
+      <th class="px-4 py-2 text-left font-medium text-gray-500 w-12 whitespace-nowrap">出席番号</th>
+      <th class="px-4 py-2 text-left font-medium text-gray-500 sticky left-0 bg-gray-100 z-30 drop-shadow-sm md:drop-shadow-none md:static whitespace-nowrap">氏名</th>
+      ${thHtml}
+    `;
+  },
 
-    const displayStudents = DashboardView.getDisplayStudents();
-
-    // Update table body
-    let tbodyHtml = displayStudents.map(student => {
+  buildBodyHtml(targetAssignments) {
+    const statusMap = DashboardView.getTodayStatusMap();
+    return DashboardView.getDisplayStudents().map(student => {
       let cellsHtml = targetAssignments.map(a => {
-        const sub = data.submissions.find(s => s.studentId === student.id && s.assignmentId === a.id);
-        const status = sub ? sub.status : '';
+        const status = statusMap.get(`${student.id}::${a.id}`) || '';
         return `
           <td class="px-2 py-2 text-center">
             <button onclick="window.dashToggleStatus('${student.id}', '${a.id}')" id="status-btn-${student.id}-${a.id}" class="w-10 h-10 md:w-12 md:h-10 mx-auto rounded-md font-bold text-base shadow-sm border focus:outline-none transition-colors ${getStatusClass(status)}">
@@ -720,7 +746,7 @@ const DashboardView = {
           </td>
         `;
       }).join('');
-      
+
       if (targetAssignments.length === 0) cellsHtml = `<td class="px-2 py-2 text-center text-gray-400">-</td>`;
 
       return `
@@ -731,9 +757,24 @@ const DashboardView = {
         </tr>
       `;
     }).join('');
-    
+  },
+
+  updateTableAndStats() {
+    DashboardView._renderedDate = getLocalDateString();
+    const targetAssignments = DashboardView.getTargetAssignments();
+    const isAllMode = DashboardView.getActiveMode() === 'all';
+
+    const select = document.getElementById('dash-assignment-select');
+    if (select) select.value = DashboardView.getActiveMode();
+
+    const theadTr = document.getElementById('dash-thead-row');
+    if (theadTr) theadTr.innerHTML = DashboardView.buildHeadHtml(targetAssignments);
+
     const tbody = document.getElementById('dash-students-tbody');
-    if (tbody) tbody.innerHTML = tbodyHtml;
+    if (tbody) tbody.innerHTML = DashboardView.buildBodyHtml(targetAssignments);
+
+    const dateLabel = document.getElementById('dash-date-label');
+    if (dateLabel) dateLabel.textContent = DashboardView.formatDateLabel(DashboardView._renderedDate);
 
     // Toggle today settings visibility
     const settingsDiv = document.getElementById('dash-today-settings-container');
@@ -761,7 +802,7 @@ const DashboardView = {
       setTimeout(() => {
         row.classList.remove('bg-green-100');
       }, 1500);
-      
+
       // Attempt to scroll row into view nicely without breaking container bounds
       const container = row.closest('.overflow-auto');
       if (container) {
@@ -774,31 +815,18 @@ const DashboardView = {
     }
   },
 
-  getTargetAssignments() {
-    const mode = document.getElementById('dash-assignment-select')?.value;
-    const data = store.data;
-    if (mode === 'all') {
-      const saved = localStorage.getItem('todayAssignments');
-      const todayIds = saved ? JSON.parse(saved) : data.assignments.map(a=>a.id);
-      return data.assignments.filter(a => todayIds.includes(a.id));
-    } else {
-      return data.assignments.filter(a => a.id === mode);
-    }
-  },
-
   updateStatsUI() {
     const statsContainer = document.getElementById('dash-stats');
     if (!statsContainer) return;
-    
-    const targetAssignments = this.getTargetAssignments();
+
+    const targetAssignments = DashboardView.getTargetAssignments();
     if (targetAssignments.length === 0) {
       statsContainer.innerHTML = `<div class="col-span-2 text-gray-500 text-xs py-2">対象がありません</div>`;
       return;
     }
 
     // 「すべて」の時は統計を省略（複雑化を避けるため）、またはシンプルに表示
-    const mode = document.getElementById('dash-assignment-select')?.value;
-    if (mode === 'all') {
+    if (DashboardView.getActiveMode() === 'all') {
       statsContainer.innerHTML = `
         <div class="col-span-2 bg-blue-50 p-2 rounded text-xs text-blue-800 border border-blue-100">
           「今日の宿題」 ${targetAssignments.length}件 を表示中<br>
@@ -808,7 +836,7 @@ const DashboardView = {
       return;
     }
 
-    const data = store.data;
+    const statusMap = DashboardView.getTodayStatusMap();
     const displayStudents = DashboardView.getDisplayStudents();
     const total = displayStudents.length;
     let submittedCount = 0;
@@ -819,8 +847,7 @@ const DashboardView = {
     const targetA = targetAssignments[0].id;
 
     displayStudents.forEach(student => {
-      const sub = data.submissions.find(s => s.studentId === student.id && s.assignmentId === targetA);
-      const status = sub ? sub.status : '';
+      const status = statusMap.get(`${student.id}::${targetA}`) || '';
       if (status === 'submitted') submittedCount++;
       else if (status === 'forgot') forgotCount++;
       else if (status === 'exempt') exemptCount++;
@@ -842,8 +869,7 @@ const DashboardView = {
     const modalContainer = document.getElementById('dash-unsubmitted-modal-content');
     if (!listContainer) return;
 
-    const data = store.data;
-    const targetAssignments = this.getTargetAssignments();
+    const targetAssignments = DashboardView.getTargetAssignments();
 
     if (targetAssignments.length === 0) {
       listContainer.innerHTML = `<div class="text-gray-400 text-center py-2 text-xs">対象の提出物がありません</div>`;
@@ -851,17 +877,17 @@ const DashboardView = {
       return;
     }
 
+    const statusMap = DashboardView.getTodayStatusMap();
     const displayStudents = DashboardView.getDisplayStudents();
 
     // 各児童の未提出をリストアップ
     let unsubmittedLines = [];
     let modalLines = [];
-    
+
     displayStudents.forEach(student => {
       let missingList = [];
       targetAssignments.forEach(a => {
-        const sub = data.submissions.find(s => s.studentId === student.id && s.assignmentId === a.id);
-        const status = sub ? sub.status : '';
+        const status = statusMap.get(`${student.id}::${a.id}`) || '';
         // "休" (absent) は未提出リストに含めない。
         // 未提出のみ表示がONの場合は forgot も含めない。
         if (status === '') {
@@ -924,13 +950,13 @@ const DashboardView = {
     const el = document.getElementById('dash-scan-result');
     if (!el) return;
     el.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800', 'bg-yellow-100', 'text-yellow-800');
-    
+
     if (type === 'success') el.classList.add('bg-green-100', 'text-green-800');
     else if (type === 'error') el.classList.add('bg-red-100', 'text-red-800');
     else if (type === 'warning') el.classList.add('bg-yellow-100', 'text-yellow-800');
-    
+
     el.textContent = text;
-    
+
     setTimeout(() => {
       if (el.textContent === text) {
         el.classList.add('hidden');
@@ -938,7 +964,8 @@ const DashboardView = {
     }, 2500);
   },
 
-  destroy() {
+  // カメラとスキャナーを止める（停止完了まで待てるよう Promise を返す）
+  async stopScanner() {
     isDashNativeScanning = false;
     if (dashNativeAnimId) {
       cancelAnimationFrame(dashNativeAnimId);
@@ -948,21 +975,32 @@ const DashboardView = {
       dashNativeStream.getTracks().forEach(t => t.stop());
       dashNativeStream = null;
     }
-    if (dashHtml5QrcodeScanner) {
+    // 停止の完了を待つ間に新しいスキャナーが代入されても、それを消さないよう手元に退避してから止める
+    const scanner = dashHtml5QrcodeScanner;
+    dashHtml5QrcodeScanner = null;
+    if (scanner) {
       try {
-        if (dashHtml5QrcodeScanner.isScanning) {
-          dashHtml5QrcodeScanner.stop().then(() => {
-            dashHtml5QrcodeScanner.clear();
-            dashHtml5QrcodeScanner = null;
-          }).catch(() => {});
-        } else {
-          dashHtml5QrcodeScanner.clear();
-          dashHtml5QrcodeScanner = null;
-        }
+        if (scanner.isScanning) await scanner.stop();
+        scanner.clear();
       } catch(e) {}
     }
+  },
+
+  // ダッシュボードを離れるときの後片付け
+  destroy() {
+    dashScanSession++; // 起動途中のスキャナーは、起動完了時に自ら停止する
+    if (dashDateTimer) {
+      clearInterval(dashDateTimer);
+      dashDateTimer = null;
+    }
+    return DashboardView.stopScanner();
   }
 };
+
+// iPadをスリープから復帰させたときなど、画面に戻った時点で日付の切り替わりを反映する
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') DashboardView.checkDateRollover();
+});
 
 // ヘルパー関数
 function getStatusClass(status) {

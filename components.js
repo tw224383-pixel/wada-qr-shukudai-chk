@@ -9,8 +9,9 @@ const utils = {
     toast.className = `${bgColor} text-white px-4 py-2 rounded shadow-lg flex items-center gap-2 toast-enter`;
     
     const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info';
-    toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span>${message}</span>`;
-    
+    toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span></span>`;
+    toast.querySelector('span').textContent = message; // 入力値を含むメッセージをHTMLとして解釈させない
+
     container.appendChild(toast);
     lucide.createIcons({ root: toast });
 
@@ -21,36 +22,70 @@ const utils = {
     }, 3000);
   },
 
-  // ビープ音を鳴らす
+  // AudioContextは1つだけ作って使い回す。
+  // スキャンのたびに new すると上限に達して例外になり、またiPad(Safari)では
+  // ユーザー操作外で作ったものは suspended のまま無音になるため。
+  _audioCtx: null,
+  getAudioContext() {
+    if (!this._audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      this._audioCtx = new Ctx();
+    }
+    if (this._audioCtx.state === 'suspended') this._audioCtx.resume().catch(() => {});
+    return this._audioCtx;
+  },
+
+  // ビープ音を鳴らす（音が鳴らなくてもスキャン処理は止めない）
   playBeep(type = 'success') {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gainNode = ctx.createGain();
+    try {
+      const ctx = this.getAudioContext();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      const now = ctx.currentTime;
 
-    osc.connect(gainNode);
-    gainNode.connect(ctx.destination);
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      gainNode.gain.setValueAtTime(0.1, now);
 
-    if (type === 'success') {
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
-      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.1);
-    } else if (type === 'error') {
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(200, ctx.currentTime);
-      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
+      if (type === 'error') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, now);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      } else if (type === 'warning') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.setValueAtTime(390, now + 0.12);
+        osc.start(now);
+        osc.stop(now + 0.24);
+      } else {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now); // A5
+        osc.start(now);
+        osc.stop(now + 0.1);
+      }
+    } catch (e) {
+      console.warn('playBeep failed', e);
     }
   },
 
   // 成功時のカスタムサウンド（10種類）
   playSuccessSound(indexStr) {
+    try {
+      this._playSuccessSound(indexStr);
+    } catch (e) {
+      console.warn('playSuccessSound failed', e);
+    }
+  },
+
+  _playSuccessSound(indexStr) {
     const index = parseInt(indexStr, 10);
     if (isNaN(index) || index === 0) return; // 0: なし
 
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
     const now = ctx.currentTime;
@@ -165,11 +200,15 @@ const utils = {
   // 音声合成による読み上げ
   speak(text) {
     if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ja-JP';
-      // Stop currently speaking
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ja-JP';
+        // Stop currently speaking
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.warn('speak failed', e);
+      }
     }
   },
 
@@ -206,7 +245,7 @@ const utils = {
   },
 
   escapeHTML(str) {
-    return str.replace(/[&<>'"]/g, 
+    return String(str ?? '').replace(/[&<>'"]/g,
       tag => ({
         '&': '&amp;',
         '<': '&lt;',
@@ -217,3 +256,16 @@ const utils = {
     );
   }
 };
+
+// iPad(Safari)は、画面を一度タップするまで効果音・読み上げが鳴らない仕様のため、
+// 最初のタップ時に AudioContext と読み上げを「解錠」しておく
+(() => {
+  const unlock = () => {
+    utils.getAudioContext();
+    if ('speechSynthesis' in window) {
+      try { window.speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch (e) {}
+    }
+    ['pointerdown', 'touchend', 'keydown'].forEach(evt => document.removeEventListener(evt, unlock, true));
+  };
+  ['pointerdown', 'touchend', 'keydown'].forEach(evt => document.addEventListener(evt, unlock, true));
+})();

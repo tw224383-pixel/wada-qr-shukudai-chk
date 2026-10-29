@@ -246,7 +246,10 @@ const MasterView = {
                   毎日の回収作業は「ダッシュボード」画面で行います。<br>
                   <strong>「スキャナー」に提出物左下のQRコードをかざすだけ</strong>で、自動的に「〇（提出済）」が記録されていきます。<br>
                   <br>
-                  スキャンが成功すると音声やバイブレーションでお知らせします。読み取りを間違えた場合や、提出を忘れた児童・欠席の児童については、名簿一覧のステータスボタンを直接タップすることで手動で「〇・忘・×・空欄」を切り替えることができます。
+                  スキャンが成功すると音声やバイブレーションでお知らせします。読み取りを間違えた場合や、提出を忘れた児童・欠席の児童については、名簿一覧のステータスボタンを直接タップすることで手動で「〇・忘・休・×・空欄」を切り替えることができます。<br>
+                  <br>
+                  提出状況は<strong>日ごとに記録</strong>され、翌日のダッシュボードは空欄から始まります。過去の記録は「提出履歴」画面で確認できます。<br>
+                  <span class="text-xs text-gray-600">※iPadでは、画面を一度タップすると効果音・読み上げが鳴るようになります。</span>
                 </p>
               </section>
             </div>
@@ -392,7 +395,9 @@ const MasterView = {
         complete: (results) => {
           const newStudents = [];
           results.data.forEach(row => {
-            if (row.length >= 2 && row[0].trim() !== '') {
+            // 本アプリでエクスポートしたCSVの見出し行は読み飛ばす
+            if (row[0] && row[0].trim() === '出席番号') return;
+            if (row.length >= 2 && row[0].trim() !== '' && row[1].trim() !== '') {
               // 0: number, 1: name, 2: class
               newStudents.push({
                 number: row[0].trim(),
@@ -433,7 +438,7 @@ const MasterView = {
         '氏名': s.name,
         'クラス': s.class || ''
       }));
-      utils.downloadCSV(`児童名簿_${new Date().toISOString().split('T')[0]}.csv`, exportData);
+      utils.downloadCSV(`児童名簿_${getLocalDateString()}.csv`, exportData);
       utils.showToast('児童名簿をエクスポートしました');
     });
 
@@ -448,6 +453,8 @@ const MasterView = {
         complete: (results) => {
           const newAssignments = [];
           results.data.forEach(row => {
+            // 本アプリでエクスポートしたCSVの見出し行は読み飛ばす
+            if (row[0] && row[0].trim() === '提出物名') return;
             if (row.length >= 1 && row[0].trim() !== '') {
               // 0: title
               newAssignments.push({
@@ -469,13 +476,13 @@ const MasterView = {
       const exportData = store.data.assignments.map(a => ({
         '提出物名': a.title
       }));
-      utils.downloadCSV(`提出物リスト_${new Date().toISOString().split('T')[0]}.csv`, exportData);
+      utils.downloadCSV(`提出物リスト_${getLocalDateString()}.csv`, exportData);
       utils.showToast('提出物リストをエクスポートしました');
     });
 
     // Backup Export
     document.getElementById('btn-export-backup').addEventListener('click', () => {
-      const filename = `wada-hw-backup_${new Date().toISOString().split('T')[0]}.json`;
+      const filename = `wada-hw-backup_${getLocalDateString()}.json`;
       utils.downloadJSON(filename, store.data);
       utils.showToast('バックアップを保存しました');
     });

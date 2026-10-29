@@ -1,6 +1,14 @@
 // store.js
 const STORAGE_KEY = 'wada_hw_checker_data';
 
+// 端末のローカル時刻（日本時間）基準の "YYYY-MM-DD"
+// ※ toISOString() はUTC基準のため、日本時間の0時〜9時に前日の日付になってしまう
+function getLocalDateString(date = new Date()) {
+  let d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const defaultData = {
   students: [
     { id: '1', number: '1', name: '青山 太郎', class: '1年1組' },
@@ -12,7 +20,8 @@ const defaultData = {
     { id: 'hw_2', title: '算数ドリル（計算）' },
     { id: 'hw_3', title: '音読カード' }
   ],
-  submissions: [] // { id, studentId, assignmentId, scannedAt }
+  // 提出記録は「児童×提出物×日付」で1件: { id, studentId, assignmentId, status, date: 'YYYY-MM-DD', scannedAt }
+  submissions: []
 };
 
 class Store {
@@ -25,18 +34,26 @@ class Store {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       try {
-        const parsed = JSON.parse(raw);
-        // Ensure arrays exist
-        parsed.students = parsed.students || [];
-        parsed.assignments = parsed.assignments || [];
-        parsed.submissions = parsed.submissions || [];
-        return parsed;
+        return this._normalize(JSON.parse(raw));
       } catch (e) {
         console.error('Failed to parse local storage', e);
-        return { ...defaultData };
       }
     }
-    return { ...defaultData };
+    return JSON.parse(JSON.stringify(defaultData));
+  }
+
+  // 配列の欠損を補い、旧バージョンの提出記録（日付なし）には記録日時から日付を補完する
+  _normalize(data) {
+    const normalized = {
+      students: Array.isArray(data.students) ? data.students : [],
+      assignments: Array.isArray(data.assignments) ? data.assignments : [],
+      submissions: Array.isArray(data.submissions) ? data.submissions : []
+    };
+    normalized.submissions.forEach(s => {
+      if (!s.date) s.date = getLocalDateString(s.scannedAt || new Date());
+      if (!s.id) s.id = this._generateId();
+    });
+    return normalized;
   }
 
   saveData(silent = false) {
@@ -56,11 +73,7 @@ class Store {
 
   restoreData(newData) {
     if (newData && Array.isArray(newData.students) && Array.isArray(newData.assignments)) {
-      this.data = {
-        students: newData.students,
-        assignments: newData.assignments,
-        submissions: newData.submissions || []
-      };
+      this.data = this._normalize(newData);
       this.saveData();
       return true;
     }
@@ -102,6 +115,7 @@ class Store {
     this.data.submissions = this.data.submissions.filter(s => s.studentId !== id);
     this.saveData();
   }
+  // 既存の児童はIDを維持し（印刷済みQRを無効にしない）、IDを持たない新規分だけ採番する
   importStudents(students) {
     this.data.students = students.map((s, i) => ({ id: `${Date.now().toString(36)}${i}${Math.random().toString(36).substring(2, 5)}`, ...s }));
     this.saveData();
@@ -131,6 +145,7 @@ class Store {
     this.data.submissions = this.data.submissions.filter(s => s.assignmentId !== id);
     this.saveData();
   }
+  // 既存の提出物はIDを維持し（印刷済みQRを無効にしない）、IDを持たない新規分だけ採番する
   importAssignments(assignments) {
     this.data.assignments = assignments.map((a, i) => ({ id: `${Date.now().toString(36)}${i}${Math.random().toString(36).substring(2, 5)}`, ...a }));
     this.saveData();
@@ -143,63 +158,70 @@ class Store {
 
   // --- Submissions ---
   getSubmissions() { return this.data.submissions; }
-  
-  // 提出追加（成功時は true, すでに提出済みの場合は false を返す）
+
+  // 指定日（既定は今日）の提出記録だけを返す。前日以前の〇は今日の表示・判定に持ち越さない
+  getSubmissionsByDate(date = getLocalDateString()) {
+    return this.data.submissions.filter(s => s.date === date);
+  }
+
+  findSubmission(studentId, assignmentId, date = getLocalDateString()) {
+    return this.data.submissions.find(s => s.studentId === studentId && s.assignmentId === assignmentId && s.date === date);
+  }
+
+  // 今日の提出を記録（成功時は true, 今日すでに同じ状態の場合は false を返す）
   addSubmission(studentId, assignmentId, status = 'submitted') {
-    const existingIdx = this.data.submissions.findIndex(s => s.studentId === studentId && s.assignmentId === assignmentId);
-    if (existingIdx !== -1) {
-      const existing = this.data.submissions[existingIdx];
+    const existing = this.findSubmission(studentId, assignmentId);
+    if (existing) {
       if (existing.status === status) return false;
-      
-      this.data.submissions[existingIdx].status = status;
-      this.data.submissions[existingIdx].scannedAt = new Date().toISOString();
+      existing.status = status;
+      existing.scannedAt = new Date().toISOString();
       this.saveData(true); // サイレント保存（UI側でDOMを直接更新するため）
       return true;
     }
 
     this.data.submissions.push({
-      id: Date.now().toString(),
+      id: this._generateId(),
       studentId,
       assignmentId,
       status,
+      date: getLocalDateString(),
       scannedAt: new Date().toISOString()
     });
     this.saveData(true); // サイレント保存
     return true;
   }
 
-  removeSubmission(studentId, assignmentId) {
-    this.data.submissions = this.data.submissions.filter(s => !(s.studentId === studentId && s.assignmentId === assignmentId));
+  // 今日の記録だけを取り消す（過去日の履歴は残す）
+  removeSubmission(studentId, assignmentId, date = getLocalDateString()) {
+    this.data.submissions = this.data.submissions.filter(s => !(s.studentId === studentId && s.assignmentId === assignmentId && s.date === date));
     this.saveData(true);
   }
 
-  // ステータスのトグル (空欄 -> submitted -> forgot -> exempt -> 空欄)
+  removeSubmissionById(id) {
+    this.data.submissions = this.data.submissions.filter(s => s.id !== id);
+    this.saveData(true);
+  }
+
+  // 今日のステータスのトグル (空欄 -> submitted -> forgot -> absent -> exempt -> 空欄)
   toggleSubmissionStatus(studentId, assignmentId) {
-    const existingIdx = this.data.submissions.findIndex(s => s.studentId === studentId && s.assignmentId === assignmentId);
-    
-    if (existingIdx === -1) {
+    const existing = this.findSubmission(studentId, assignmentId);
+
+    if (!existing) {
       this.addSubmission(studentId, assignmentId, 'submitted');
       return 'submitted';
     }
 
-    const currentStatus = this.data.submissions[existingIdx].status;
-    let nextStatus = '';
-
-    if (currentStatus === 'submitted') nextStatus = 'forgot';
-    else if (currentStatus === 'forgot') nextStatus = 'absent';
-    else if (currentStatus === 'absent') nextStatus = 'exempt';
-    else if (currentStatus === 'exempt') nextStatus = ''; // 空欄(削除)
-    else nextStatus = 'submitted'; // フォールバック
+    const nextMap = { submitted: 'forgot', forgot: 'absent', absent: 'exempt', exempt: '' };
+    const nextStatus = existing.status in nextMap ? nextMap[existing.status] : 'submitted';
 
     if (nextStatus === '') {
       this.removeSubmission(studentId, assignmentId);
       return '';
-    } else {
-      this.data.submissions[existingIdx].status = nextStatus;
-      this.data.submissions[existingIdx].scannedAt = new Date().toISOString();
-      this.saveData(true);
-      return nextStatus;
     }
+    existing.status = nextStatus;
+    existing.scannedAt = new Date().toISOString();
+    this.saveData(true);
+    return nextStatus;
   }
 }
 
